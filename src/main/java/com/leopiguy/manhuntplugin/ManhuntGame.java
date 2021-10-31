@@ -12,6 +12,7 @@ import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.CompassMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -124,14 +125,14 @@ public class ManhuntGame {
             player.addPotionEffect(new PotionEffect(PotionEffectType.JUMP,60 * 20, 250));
             player.addPotionEffect(new PotionEffect(PotionEffectType.SLOW,59 * 20, 250));
             player.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_DIGGING,60 * 20, 100));
-            setPlayerHuntedNames(player);
+            setPlayerHunterNames(player);
             this.setPlayerStartupConfig(player);
             giveCompass(player);
         }
         this.countdown(60);
     }
 
-    private void giveCompass(Player player) {
+    private ItemStack makeCompass(Player player) {
         ItemStack compass = new ItemStack(Material.COMPASS, 1);
         ItemMeta meta = compass.getItemMeta();
         assert meta != null;
@@ -139,26 +140,35 @@ public class ManhuntGame {
         meta.setLore(new ArrayList<>(Collections.singletonList("Tracks nearest hunted player")));
         compass.setItemMeta(meta);
         player.setCompassTarget(getNearestHuntedLocation(player));
+        return compass;
+    }
+
+    private void giveCompass(Player player) {
+        ItemStack compass = makeCompass(player);
         player.getInventory().setItemInOffHand(compass);
     }
 
     private Location getNearestHuntedLocation(Player player) {
         Location currentPlayerLocation = player.getLocation();
-        ArrayList<Location> locationArray = new ArrayList<>();
+        World.Environment currentEnvironment = Objects.requireNonNull(currentPlayerLocation.getWorld()).getEnvironment();
+
+        ArrayList<Location> inWorldArray = new ArrayList<>();
+        ArrayList<Location> outWorldArray = new ArrayList<>();
         for (Player p : huntedList.values()) {
-            if (Objects.requireNonNull(p.getLocation().getWorld()).getEnvironment() == World.Environment.NORMAL) {
-                lastKnownLocation.put(p.getUniqueId().toString(), p.getLocation());
-                locationArray.add(p.getLocation());
+            lastKnownLocation.put(String.format("%s%s", Objects.requireNonNull(p.getLocation().getWorld()).getEnvironment(), p.getUniqueId().toString()), p.getLocation());
+            if (Objects.requireNonNull(p.getLocation().getWorld()).getEnvironment() == currentEnvironment) {
+                inWorldArray.add(p.getLocation());
             } else {
-                locationArray.add(lastKnownLocation.get(p.getUniqueId().toString()));
+                outWorldArray.add(lastKnownLocation.get(String.format("%s%s", currentEnvironment, p.getUniqueId().toString())));
             }
         }
-        if(locationArray.size() == 1) return locationArray.get(0);
-        if(locationArray.size() == 0) return Objects.requireNonNull(currentPlayerLocation.getWorld()).getSpawnLocation();
+        if(inWorldArray.size() == 1) return inWorldArray.get(0);
+        ArrayList<Location> loopLocation = (inWorldArray.size() == 0) ? outWorldArray : inWorldArray;
+        if(loopLocation.size() == 0) return Objects.requireNonNull(currentPlayerLocation.getWorld()).getSpawnLocation();
 
         Location closestLoc = null;
         double closestDist = Integer.MAX_VALUE;
-        for (Location location : locationArray) {
+        for (Location location : loopLocation) {
             if(closestLoc == null) {
                 closestLoc = location;
                 closestDist = currentPlayerLocation.distanceSquared(location);
@@ -179,7 +189,19 @@ public class ManhuntGame {
                     hunter.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText("Tracker Updating...", net.md_5.bungee.api.ChatColor.GREEN));
                     isTrackingList.put(hunter.getUniqueId().toString(), true);
                 }
-                hunter.setCompassTarget(getNearestHuntedLocation(hunter));
+                boolean isMainHand = hunter.getInventory().getItemInMainHand().getType() == Material.COMPASS;
+                if(Objects.requireNonNull(hunter.getLocation().getWorld()).getEnvironment() == World.Environment.NETHER) {
+                    ItemStack oldCompass = (isMainHand) ? hunter.getInventory().getItemInMainHand() : hunter.getInventory().getItemInOffHand();
+                    CompassMeta meta = (CompassMeta) oldCompass.getItemMeta();
+                    Objects.requireNonNull(meta).setLodestoneTracked(false);
+                    meta.setLodestone(getNearestHuntedLocation(hunter));
+                    oldCompass.setItemMeta(meta);
+                    hunter.updateInventory();
+                } else {
+                    if (isMainHand) hunter.getInventory().setItemInMainHand(makeCompass(hunter));
+                    else hunter.getInventory().setItemInOffHand(makeCompass(hunter));
+                    hunter.setCompassTarget(getNearestHuntedLocation(hunter));
+                }
             } else {
                 if(isTrackingList.get(hunter.getUniqueId().toString())) {
                     hunter.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText("Tracker NOT Updating", net.md_5.bungee.api.ChatColor.RED));

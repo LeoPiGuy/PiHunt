@@ -94,9 +94,11 @@ public class MainGameContainer {
 
     private void scheduler() {
         if(!isGameRunning) return;
-        for (ManhuntGame game : gameList.values()) {
-            game.updateCompasses();
-        }
+        try {
+            for (ManhuntGame game : gameList.values()) {
+                game.updateCompasses();
+            }
+        } catch (IllegalArgumentException e) {}
         this.gameScheduler = Bukkit.getScheduler().runTaskLater(pluginRef, this::scheduler, 5);
     }
 
